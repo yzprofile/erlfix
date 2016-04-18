@@ -7,7 +7,7 @@ This branch is try to make it easy to use and clean
 ## Usage:
 ```bash
 
-make gen_parser spec=4FIX44.xml
+make gen_parser spec=FIX44.xml
 
 ```
 
