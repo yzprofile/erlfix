@@ -1,0 +1,14 @@
+{application, erlfix,
+ [
+  {description, "An Erlang erlfix library"},
+  {vsn, "1"},
+  {modules, [
+             erlfix
+            ]},
+  {registered, []},
+  {applications, [
+                  kernel,
+                  stdlib
+                 ]},
+  {env, []}
+ ]}.

@@ -3,61 +3,59 @@
 
 -compile(export_all).
 
-
-
 -record(header, {
-  fields = [],
-  required = []
-}).
+          fields = [],
+          required = []
+         }).
 
 -record(message, {
-  name,
-  code,
-  type,
-  admin = false,
-  modified_fields = false,
-  fields = [],
-  required = [],
-  components = [],
-  groups = []
-}).
+          name,
+          code,
+          type,
+          admin = false,
+          modified_fields = false,
+          fields = [],
+          required = [],
+          components = [],
+          groups = []
+         }).
 
 -record(component, {
-  name,
-  code,
-  required = false,
-  fields = [],
-  components = []
-}).
+          name,
+          code,
+          required = false,
+          fields = [],
+          components = []
+         }).
 
 -record(field, {
-  name,
-  code,
-  number,
-  type,
-  raw_type,
-  choices = []
-}).
+          name,
+          code,
+          number,
+          type,
+          raw_type,
+          choices = []
+         }).
 
 -record(group, {
-  counter,
-  name,
-  fields = [],
-  stack
-}).
+          counter,
+          name,
+          fields = [],
+          stack
+         }).
 
 -record(parser, {
-  state,
-  header = #header{},
-  message,
-  messages = [],
-  field,
-  fields = [],
-  component,
-  inline = false,
-  components = [],
-  groups = []
-}).
+          state,
+          header = #header{},
+          message,
+          messages = [],
+          field,
+          fields = [],
+          component,
+          inline = false,
+          components = [],
+          groups = []
+         }).
 
 main([SpecPath]) ->
     F = root(),
@@ -69,98 +67,108 @@ main([SpecPath]) ->
 
 root() -> filename:dirname(code:which(?MODULE)).
 
-config() -> [].
-
 parse(SpecPath) ->
     {ok, Xml} = file:read_file(root() ++"/spec/" ++ SpecPath),
-    {ok, #parser{messages = Messages} = State, _} = erlsom:parse_sax(Xml, #parser{}, fun handler/2, []),
-    Prepend = ["exchange", "sending_time"],
-    Config = config(),
-    MessagesConfig = proplists:get_value(messages, Config, []),
+    {ok, #parser{messages = Messages} = State, _} =
+        erlsom:parse_sax(Xml, #parser{}, fun handler/2, []),
 
-    Messages1 = [begin
-                     MsgConfig = proplists:get_value(list_to_atom(Name), MessagesConfig, []),
-                     {Fields1, Flag} = case proplists:get_value(fields, MsgConfig) of
-                                           undefined -> {Prepend ++ Fields, false};
-                                           F -> {[atom_to_list(N) || N <- F], true}
-                                       end,
-                     Message#message{fields = Fields1, modified_fields = Flag}
-                 end || #message{fields = Fields, name = Name} = Message <- Messages],
-    Messages2 = case proplists:get_value(business_messages, Config) of
-                    undefined -> Messages1;
-                    BusinessMessages ->
-                        [Msg || #message{admin = Admin, name = Name} = Msg <- Messages1, Admin == true orelse true == lists:member(list_to_atom(Name), BusinessMessages)]
-                end,
-    State#parser{messages = Messages2}.
+    Prepend = ["exchange", "sending_time"],
+    NewMessages = [begin
+                       {Fields1, Flag} = {Prepend ++ Fields, false},
+                       Message#message{fields = Fields1, modified_fields = Flag}
+                   end || #message{fields = Fields} = Message <- Messages],
+    State#parser{messages = NewMessages}.
 
 
 generate_includes(SpecPath) ->
     #parser{messages = Messages, fields = Fields} = parse(SpecPath),
-    write_messages_to_header([Message || #message{admin = Admin} = Message <- Messages, Admin == true], Fields, root() ++ "/include/admin.hrl"),
-    write_messages_to_header([Message || #message{admin = Admin} = Message <- Messages, Admin == false], Fields, root() ++ "/include/business.hrl"),
+
+    write_messages_to_header(
+      [Message || #message{admin = Admin} = Message <- Messages, Admin == true],
+      Fields, root() ++ "/include/admin.hrl"),
+
+    write_messages_to_header(
+      [Message || #message{admin = Admin} = Message <- Messages, Admin == false],
+      Fields, root() ++ "/include/business.hrl"),
     ok.
 
 generate_parser(SpecPath) ->
-  file:write_file(root() ++ "/src/fix_parser.erl", parser_body(SpecPath)).
+    file:write_file(root() ++ "/src/fix_parser.erl", parser_body(SpecPath)).
 
 
 parser_body(SpecPath) ->
-  #parser{messages = Messages, fields = Fields} = parse(SpecPath),
-  Header = ["-module(fix_parser).\n-include(\"../include/admin.hrl\").\n-include(\"../include/business.hrl\").\n\n",
-  "-export([decode_message/1, field_by_number/1, number_by_field/1, decode_typed_field/2, encode_typed_field/2, message_by_number/1, number_by_message/1]).\n\n"],
-  Body1 = generate_decode_message(Messages, Fields),
-  Body4 = generate_field_by_number(Fields),
-  Body5 = generate_decode_typed_field(Fields),
-  Body6 = generate_encode_typed_field(Fields),
-  Body7 = generate_number_by_field(Fields),
-  Body8 = generate_message_by_number(Messages),
-  Body9 = generate_number_by_message(Messages),
-  Body10 = add_parse_num(),
-  iolist_to_binary([Header, Body1, Body4, Body5, Body6, Body7, Body8, Body9, Body10]).
+    #parser{messages = Messages, fields = Fields} = parse(SpecPath),
+    Header =
+        [
+         "-module(fix_parser).\n"
+         "-include(\"admin.hrl\").\n"
+         "-include(\"business.hrl\").\n\n",
+         "-export([decode_message/1, field_by_number/1, number_by_field/1]).\n"
+         "-export([decode_typed_field/2, encode_typed_field/2]).\n"
+         "-export([message_by_number/1, number_by_message/1]).\n\n"
+        ],
+    Body1 = generate_decode_message(Messages, Fields),
+    Body4 = generate_field_by_number(Fields),
+    Body5 = generate_decode_typed_field(Fields),
+    Body6 = generate_encode_typed_field(Fields),
+    Body7 = generate_number_by_field(Fields),
+    Body8 = generate_message_by_number(Messages),
+    Body9 = generate_number_by_message(Messages),
+    Body10 = add_parse_num(),
+    iolist_to_binary([Header, Body1, Body4, Body5,
+                      Body6, Body7, Body8, Body9, Body10]).
 
 generate_decode_message(Messages, Fields) ->
-  Bodies1 = [
-  ["decode_message([{msg_type,",Name,"}|Message]) -> % ", Code, "\n",
-  "  decode_fields(Message, #",Name,"{}, ",Name,", ",integer_to_list(default_field_offset(Msg, Fields)),")"]
-  || #message{name = Name, code = Code} = Msg <- Messages],
+    Bodies1 =
+        [[
+          "decode_message([{msg_type,",Name,"}|Message]) -> % ", Code, "\n",
+          "    decode_fields(Message, #", Name, "{}, ", Name,", ",
+          integer_to_list(default_field_offset(Msg, Fields)),")"
+         ] || #message{name = Name, code = Code} = Msg <- Messages
+        ],
 
-  Config = config(),
-  SkipFields = [atom_to_list(F) || F <- proplists:get_value(skip_fields, Config, [])],
-  Bodies2_ = [begin
-    UsedFields = message_fields(Msg, Fields) -- SkipFields,
-    Indexes = lists:zip(UsedFields, lists:seq(2, 1+length(UsedFields))),
+    Bodies2_ =
+        [begin
+             UsedFields = message_fields(Msg, Fields),
+             Indexes = lists:zip(UsedFields, lists:seq(2, 1+length(UsedFields))),
 
-    [["field_index(",RecordName,", ",FieldName,") -> false;\n"] || FieldName <- SkipFields] ++
-    [["field_index(",RecordName,", ",FieldName,") -> ",integer_to_list(Index),";\n"] || {FieldName,Index} <- Indexes]
-  end|| #message{name = RecordName} = Msg <- Messages],
-  Bodies2 = [Bodies2_, "field_index(_,_) -> undefined.\n\n"],
+             [
+              ["field_index(",RecordName,", ",FieldName,") -> ",
+               integer_to_list(Index),";\n"
+              ] || {FieldName,Index} <- Indexes
+             ]
+         end || #message{name = RecordName} = Msg <- Messages],
+    Bodies2 = [Bodies2_, "field_index(_,_) -> undefined.\n\n"],
 
-  Bodies3 = [
-  "decode_fields([{Code,Value}|Message], Record, RecordName, Default) ->\n"
-  "  Record1 = case field_index(RecordName, Code) of\n"
-  "    undefined -> erlang:setelement(Default, Record, [{Code,Value}|erlang:element(Default,Record)]);\n"
-  "    false -> Record;\n"
-  "    Index -> erlang:setelement(Index, Record, Value)\n"
-  "  end,\n"
-  "  decode_fields(Message, Record1, RecordName, Default);\n\n"
-  "decode_fields([], Record, _RecordName, Default) ->\n"
-  "  erlang:setelement(Default, Record, lists:reverse(erlang:element(Default,Record))).\n\n"
-  ],
-
-  [string:join(Bodies1, ";\n\n"), ".\n\n", Bodies2, Bodies3].
+    Bodies3 =
+        [
+         "decode_fields([{Code,Value}|Message], Record, RecordName, Default) ->\n"
+         "    Record1 = case field_index(RecordName, Code) of\n"
+         "        undefined -> erlang:setelement(Default, Record, [{Code,Value}|erlang:element(Default,Record)]);\n"
+         "        false -> Record;\n"
+         "        Index -> erlang:setelement(Index, Record, Value)\n"
+         "    end,\n"
+         "    decode_fields(Message, Record1, RecordName, Default);\n\n"
+         "decode_fields([], Record, _RecordName, Default) ->\n"
+         "    erlang:setelement(Default, Record, lists:reverse(erlang:element(Default,Record))).\n\n"
+        ],
+    [string:join(Bodies1, ";\n\n"), ".\n\n", Bodies2, Bodies3].
 
 generate_field_by_number(Fields) ->
   [
-  [["field_by_number(<<\"",Number,"\">>) -> ",Name,";\n"] || #field{name = Name, number = Number} <- Fields],
-  "field_by_number(_Key) -> undefined.\n\n"
+   [
+    ["field_by_number(<<\"",Number,"\">>) -> ",Name,";\n"]
+    || #field{name = Name, number = Number} <- Fields],
+   "field_by_number(_Key) -> undefined.\n\n"
   ].
 
 generate_number_by_field(Fields) ->
-  [
-  "number_by_field(Key) when is_integer(Key) -> list_to_binary(integer_to_list(Key));\n",
-  [["number_by_field(",Name,") -> <<\"",Number,"\">>;\n"] || #field{name = Name, number = Number} <- Fields],
-  "number_by_field(Key) when is_binary(Key) -> Key.\n\n"
-  ].
+    [
+     "number_by_field(Key) when is_integer(Key) -> list_to_binary(integer_to_list(Key));\n",
+     [["number_by_field(",Name,") -> <<\"",Number,"\">>;\n"]
+      || #field{name = Name, number = Number} <- Fields],
+     "number_by_field(Key) when is_binary(Key) -> Key.\n\n"
+    ].
 
 generate_message_by_number(Messages) ->
   [
@@ -175,35 +183,49 @@ generate_number_by_message(Messages) ->
   ].
 
 generate_decode_typed_field(Fields) ->
-  [
-  lists:map(fun
-    (#field{name = "msg_type"}) -> ["decode_typed_field(msg_type, V) -> message_by_number(V);\n"];
-    (#field{name = Name, type = int}) -> ["decode_typed_field(",Name,", V) -> parse_num(V);\n"];
-    (#field{name = Name, type = float}) -> ["decode_typed_field(",Name,", V) -> parse_num(V)*1.0;\n"];
-    (#field{name = Name, type = bool}) -> ["decode_typed_field(",Name,", V) -> V == <<\"Y\">>;\n"];
-    (#field{name = Name, type = choice, choices = Choices}) ->
-      [["decode_typed_field(",Name,", <<\"",Value,"\">>) -> '",underscore(Desc),"';\n"] || {Value,Desc} <- Choices];
-    (#field{name = Name}) -> ["decode_typed_field(",Name,", V) -> V;\n"]
-  end, Fields),
-  "decode_typed_field(_Key, V) -> V.\n\n"
-  ].
+    [
+     lists:map(
+       fun
+           (#field{name = "msg_type"}) ->
+               ["decode_typed_field(msg_type, V) -> message_by_number(V);\n"];
+           (#field{name = Name, type = int}) ->
+               ["decode_typed_field(",Name,", V) -> parse_num(V);\n"];
+           (#field{name = Name, type = float}) ->
+               ["decode_typed_field(",Name,", V) -> parse_num(V)*1.0;\n"];
+           (#field{name = Name, type = bool}) ->
+               ["decode_typed_field(",Name,", V) -> V == <<\"Y\">>;\n"];
+           (#field{name = Name, type = choice, choices = Choices}) ->
+               [
+                ["decode_typed_field(",Name,", <<\"",Value,"\">>) -> '", underscore(Desc),"';\n"]
+                || {Value,Desc} <- Choices
+               ];
+           (#field{name = Name}) ->
+               ["decode_typed_field(", Name, ", V) -> V;\n"]
+       end, Fields),
+     "decode_typed_field(_Key, V) -> V.\n\n"
+    ].
 
 generate_encode_typed_field(Fields) ->
   [
-  lists:map(fun
-    (#field{name = "msg_type"}) -> ["encode_typed_field(msg_type, V) -> number_by_message(V);\n"];
-    (#field{name = Name, type = int}) -> ["encode_typed_field(",Name,", V) when is_integer(V) -> list_to_binary(integer_to_list(V));\n"];
-    (#field{name = Name, type = float}) -> ["encode_typed_field(",Name,", V) when is_float(V) -> iolist_to_binary(io_lib:format(\"~.3f\", [V*1.0]));\n"];
-    (#field{name = Name, type = bool}) -> ["encode_typed_field(",Name,", true) -> <<\"Y\">>;\nencode_typed_field(",Name,",false) -> <<\"N\">>;\n"];
-    (#field{name = Name, type = choice, choices = Choices}) ->
-      [["encode_typed_field(",Name,", '",underscore(Desc),"') -> <<\"",Value,"\">>;\n"] || {Value,Desc} <- Choices];
-    (#field{}) -> []
-  end, Fields),
-  "encode_typed_field(_Key, V) when is_binary(V) -> V;\n"
-  "encode_typed_field(_Key, V) when is_list(V) -> V;\n"
-  "encode_typed_field(_Key, V) when is_integer(V) -> list_to_binary(integer_to_list(V));\n"
-  "encode_typed_field(_Key, V) when is_float(V) -> iolist_to_binary(io_lib:format(\"~.3f\", [V*1.0])).\n"
-  "\n"
+   lists:map(
+     fun
+         (#field{name = "msg_type"}) ->
+             ["encode_typed_field(msg_type, V) -> number_by_message(V);\n"];
+         (#field{name = Name, type = int}) ->
+             ["encode_typed_field(",Name,", V) when is_integer(V) -> list_to_binary(integer_to_list(V));\n"];
+         (#field{name = Name, type = float}) ->
+             ["encode_typed_field(",Name,", V) when is_float(V) -> iolist_to_binary(io_lib:format(\"~.3f\", [V*1.0]));\n"];
+         (#field{name = Name, type = bool}) ->
+             ["encode_typed_field(",Name,", true) -> <<\"Y\">>;\nencode_typed_field(",Name,",false) -> <<\"N\">>;\n"];
+         (#field{name = Name, type = choice, choices = Choices}) ->
+             [["encode_typed_field(",Name,", '",underscore(Desc),"') -> <<\"",Value,"\">>;\n"] || {Value,Desc} <- Choices];
+         (#field{}) -> []
+            end, Fields),
+   "encode_typed_field(_Key, V) when is_binary(V) -> V;\n"
+   "encode_typed_field(_Key, V) when is_list(V) -> V;\n"
+   "encode_typed_field(_Key, V) when is_integer(V) -> list_to_binary(integer_to_list(V));\n"
+   "encode_typed_field(_Key, V) when is_float(V) -> iolist_to_binary(io_lib:format(\"~.3f\", [V*1.0])).\n"
+   "\n"
   ].
 
 

@@ -2,6 +2,8 @@ include/business.hrl
 include/admin.hrl
 src/fix_parser.erl
 c_src/splitter.h
+ebin/*
+priv/*
 *.d
 *.o
 *.beam
